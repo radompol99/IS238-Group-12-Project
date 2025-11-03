@@ -2,15 +2,23 @@ service: is238-email-ingestion
 
 frameworkVersion: '3'
 
+plugins:
+  - serverless-esbuild
+
 provider:
   name: aws
   runtime: nodejs20.x
   region: ${env:AWS_REGION, 'us-east-1'}
   environment:
+    DOMAIN: ${env:DOMAIN}
     S3_BUCKET: ${env:S3_BUCKET}
     DDB_TABLE: ${env:DDB_TABLE}
     SECRETS_ARN: ${env:SECRETS_ARN}
     GMAIL_USER: ${env:GMAIL_USER}
+    TELEGRAM_BOT_TOKEN: ${env:TELEGRAM_BOT_TOKEN}
+    WEBHOOK_SECRET: ${env:WEBHOOK_SECRET}
+    OPENAI_SUMMARY_URL: ${env:OPENAI_SUMMARY_URL}
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
     ENABLE_FETCH: ${env:ENABLE_FETCH, 'false'}
   iam:
     role:
@@ -23,14 +31,19 @@ provider:
           Action:
             - s3:PutObject
             - s3:GetObject
-          Resource: arn:aws:s3:::${env:S3_BUCKET}/*
+          Resource:
+            - arn:aws:s3:::${env:S3_BUCKET}
+            - arn:aws:s3:::${env:S3_BUCKET}/*
         - Effect: Allow
           Action:
             - dynamodb:PutItem
             - dynamodb:UpdateItem
+            - dynamodb:Query
+            - dynamodb:GetItem
             - dynamodb:DescribeTable
           Resource:
             - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/${env:DDB_TABLE}
+            - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/${env:DDB_TABLE}/index/GSI1
 
 functions:
   lambda1FetchGmail:
@@ -40,10 +53,32 @@ functions:
     description: Fetch unread Gmail via IMAP, store raw emails to S3
     events:
       - schedule:
-          rate: rate(5 minutes)
+          rate: rate(1 minute)
           enabled: false
 
+  lambda2ProcessS3:
+    handler: src/lambda2_process_s3/handler.handler
+    timeout: 180
+    memorySize: 512
+    description: Process new email objects from S3, summarize, notify Telegram
+    events:
+      - s3:
+          bucket: ${env:S3_BUCKET}
+          event: s3:ObjectCreated:*
+          existing: true
+
+  lambda3TelegramWebhook:
+    handler: src/lambda3_telegram_webhook/handler.handler
+    timeout: 30
+    memorySize: 256
+    description: Telegram webhook handler for commands and actions
+    events:
+      - httpApi:
+          method: POST
+          path: /telegram/webhook
+
 package:
+  individually: true
   patterns:
     - '!**/*.test.*'
     - 'src/**'
@@ -51,4 +86,64 @@ package:
 
 custom:
   stage: ${opt:stage, 'dev'}
+  esbuild:
+    bundle: true
+    minify: true
+    sourcemap: true
+    target: node20
+    platform: node
+    concurrency: 10
+    external: []
 
+resources:
+  Resources:
+    EmailBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${env:S3_BUCKET}
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+        LifecycleConfiguration:
+          Rules:
+            - Id: email-retention
+              Status: Enabled
+              Transitions:
+                - StorageClass: GLACIER_IR
+                  TransitionInDays: 30
+              ExpirationInDays: 180
+    EmailTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${env:DDB_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: pk
+            AttributeType: S
+          - AttributeName: sk
+            AttributeType: S
+          - AttributeName: GSI1PK
+            AttributeType: S
+          - AttributeName: GSI1SK
+            AttributeType: S
+        KeySchema:
+          - AttributeName: pk
+            KeyType: HASH
+          - AttributeName: sk
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: GSI1
+            KeySchema:
+              - AttributeName: GSI1PK
+                KeyType: HASH
+              - AttributeName: GSI1SK
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+    # Output the webhook URL via HttpApi default endpoint + path
+  Outputs:
+    TelegramWebhookPath:
+      Value: /telegram/webhook
+      Description: Path for Telegram webhook (append to your HttpApi URL)
