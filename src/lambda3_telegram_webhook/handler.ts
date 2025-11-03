@@ -150,9 +150,7 @@ async function createAddress(chatId: number): Promise<string> {
   const addr = randAddress();
   const pk = `USER#${chatId}`;
   
-  // Create Cloudflare email route
-  const routeId = await createCloudflareEmailRoute(addr);
-  
+  // First, write to DynamoDB without Cloudflare route ID
   try {
     await ddb.send(new PutItemCommand({
       TableName: TABLE,
@@ -163,7 +161,6 @@ async function createAddress(chatId: number): Promise<string> {
         GSI1SK: { S: `USER#${chatId}` },
         status: { S: 'ACTIVE' },
         chatId: { N: String(chatId) },
-        ...(routeId && { cloudflareRouteId: { S: routeId } }),
       },
       ConditionExpression: 'attribute_not_exists(pk)',
     }));
@@ -179,10 +176,33 @@ async function createAddress(chatId: number): Promise<string> {
         GSI1SK: { S: `USER#${chatId}` },
         status: { S: 'ACTIVE' },
         chatId: { N: String(chatId) },
-        ...(routeId && { cloudflareRouteId: { S: routeId } }),
       },
     }));
   }
+  
+  // After successful DB write, create Cloudflare email route
+  const routeId = await createCloudflareEmailRoute(addr);
+  
+  // Update the DB record with the Cloudflare route ID if creation succeeded
+  if (routeId) {
+    try {
+      await ddb.send(new UpdateItemCommand({
+        TableName: TABLE,
+        Key: {
+          pk: { S: pk },
+          sk: { S: `ADDRESS#${addr}` },
+        },
+        UpdateExpression: 'SET cloudflareRouteId = :routeId',
+        ExpressionAttributeValues: {
+          ':routeId': { S: routeId },
+        },
+      }));
+    } catch (error) {
+      console.error('Failed to update DB with Cloudflare route ID:', error);
+      // Route creation succeeded but DB update failed - log for manual cleanup if needed
+    }
+  }
+  
   return addr;
 }
 
