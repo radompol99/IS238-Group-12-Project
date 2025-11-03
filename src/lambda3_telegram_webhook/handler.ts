@@ -27,8 +27,15 @@ export const handler = async (event: any) => {
     if (data.startsWith('deactivate:')) {
       const addr = data.split(':')[1];
       try {
-        await deactivateAddress(chatId, addr);
-        await sendTelegram(chatId, `✅ <b>Address deactivated</b>\n\n📧 <code>${addr}</code>\n\nThis address will no longer receive emails.`);
+        const result = await deactivateAddress(chatId, addr);
+        
+        if (result === 'NOT_FOUND') {
+          await sendTelegram(chatId, `❌ <b>Address not found</b>\n\n📧 <code>${addr}</code>\n\nThis address doesn't exist or doesn't belong to you.`);
+        } else if (result === 'SUCCESS') {
+          await sendTelegram(chatId, `✅ <b>Address deactivated</b>\n\n📧 <code>${addr}</code>\n\nThis address will no longer receive emails.`);
+        } else {
+          await sendTelegram(chatId, `❌ <b>Failed to deactivate address</b>\n\n📧 <code>${addr}</code>\n\nThere was an error removing the email routing. Please try again later.`);
+        }
       } catch (error) {
         await sendTelegram(chatId, `❌ <b>Failed to deactivate address</b>\n\n📧 <code>${addr}</code>\n\nThere was an error removing the email routing. Please try again later.`);
       }
@@ -105,14 +112,31 @@ Use /new to create your first temporary email address!`);
     } else {
       const addr = parts[1].trim();
       try {
-        await deactivateAddress(chatId, addr);
-        await sendTelegram(chatId, `✅ <b>Address deactivated</b>
+        const result = await deactivateAddress(chatId, addr);
+        
+        if (result === 'NOT_FOUND') {
+          await sendTelegram(chatId, `❌ <b>Address not found</b>
+
+📧 <code>${addr}</code>
+
+This address doesn't exist or doesn't belong to you.
+
+💡 Use /list to see your active addresses`);
+        } else if (result === 'SUCCESS') {
+          await sendTelegram(chatId, `✅ <b>Address deactivated</b>
 
 📧 <code>${addr}</code>
 
 This address will no longer receive emails.
 
 Use /new to create a new address or /list to see your remaining addresses.`);
+        } else {
+          await sendTelegram(chatId, `❌ <b>Failed to deactivate address</b>
+
+📧 <code>${addr}</code>
+
+There was an error removing the email routing. Please try again later.`);
+        }
       } catch (error) {
         await sendTelegram(chatId, `❌ <b>Failed to deactivate address</b>
 
@@ -233,7 +257,7 @@ async function listAddresses(chatId: number): Promise<string[]> {
     .map(i => (i.sk?.S || '').replace('ADDRESS#', ''));
 }
 
-async function deactivateAddress(chatId: number, addr: string) {
+async function deactivateAddress(chatId: number, addr: string): Promise<'SUCCESS' | 'NOT_FOUND' | 'ERROR'> {
   const pk = `USER#${chatId}`;
   
   // Get the address record to find the Cloudflare route ID
@@ -247,24 +271,41 @@ async function deactivateAddress(chatId: number, addr: string) {
   }));
 
   const addressRecord = getResult.Items?.[0];
+  
+  // Check if address exists and belongs to the user
+  if (!addressRecord) {
+    return 'NOT_FOUND';
+  }
+  
+  // Check if address is already inactive
+  if (addressRecord.status?.S === 'INACTIVE') {
+    return 'NOT_FOUND';
+  }
+  
   const routeId = addressRecord?.cloudflareRouteId?.S;
 
   // Delete Cloudflare route if it exists
   if (routeId) {
     const deleteSuccess = await deleteCloudflareEmailRoute(routeId);
     if (!deleteSuccess) {
-      throw new Error('Failed to delete Cloudflare email route');
+      return 'ERROR';
     }
   }
 
   // Update DynamoDB status only if Cloudflare deletion succeeded (or no route existed)
-  await ddb.send(new UpdateItemCommand({
-    TableName: TABLE,
-    Key: { pk: { S: pk }, sk: { S: `ADDRESS#${addr}` } },
-    UpdateExpression: 'SET #s = :inactive',
-    ExpressionAttributeNames: { '#s': 'status' },
-    ExpressionAttributeValues: { ':inactive': { S: 'INACTIVE' } },
-  }));
+  try {
+    await ddb.send(new UpdateItemCommand({
+      TableName: TABLE,
+      Key: { pk: { S: pk }, sk: { S: `ADDRESS#${addr}` } },
+      UpdateExpression: 'SET #s = :inactive',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: { ':inactive': { S: 'INACTIVE' } },
+    }));
+    return 'SUCCESS';
+  } catch (error) {
+    console.error('Failed to update DynamoDB status:', error);
+    return 'ERROR';
+  }
 }
 
 async function sendTelegram(chatId: number, text: string) {
