@@ -109,9 +109,49 @@ DDB_GSI1=GSI1
 SECRETS_ARN=arn:aws:secretsmanager:REGION:ACCT:secret:gmail-oauth-secrets-ABC
 GMAIL_USER=mvp-bot-inbox@gmail.com
 TELEGRAM_BOT_TOKEN=123456:ABC...
+WEBHOOK_SECRET=your-webhook-secret
 OPENAI_SUMMARY_URL=https://your-openai-endpoint/summary
 OPENAI_API_KEY=your-api-key
+
+# Cloudflare Email Routing (for automatic email forwarding)
+CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
+CLOUDFLARE_ZONE_ID=your-zone-id
 ```
+
+### STEP 2.1 – Cloudflare Setup (Required)
+
+**What is Cloudflare Email Routing?**
+Cloudflare Email Routing allows you to automatically forward emails sent to your custom domain to your Gmail inbox without needing your own email server.
+
+**Setup Steps:**
+
+1. **Add your domain to Cloudflare**
+   - Go to https://dash.cloudflare.com
+   - Add your domain (e.g., `upou2025manny.ninja`)
+   - Update your domain's nameservers to Cloudflare's nameservers
+
+2. **Enable Email Routing**
+   - In Cloudflare Dashboard, go to Email → Email Routing
+   - Click "Get started" and follow the setup wizard
+   - Add your Gmail address as a verified destination email
+   - Verify the email address by clicking the link sent to your Gmail
+
+3. **Get API Token**
+   - Go to My Profile → API Tokens → Create Token
+   - Use template "Edit Zone" or create custom token with this permission:
+     - Zone → Email Routing Rules → Edit
+   - Copy the API token to `CLOUDFLARE_API_TOKEN`
+
+4. **Get Zone ID and Account ID**
+   - Go to your domain's Overview page in Cloudflare
+   - Scroll down to "API" section on the right sidebar
+   - Copy **Zone ID** to `CLOUDFLARE_ZONE_ID`
+
+**How it works:**
+- When a user creates a new email address (`/new`), Lambda 3 automatically creates a Cloudflare Email Routing rule
+- Emails sent to `abc123@yourdomain.com` → Forwarded to your Gmail inbox
+- When deactivated (`/deactivate`), Lambda 3 deletes the routing rule
+- Lambda 1 fetches from Gmail and processes the emails
 
 ### STEP 3 – AWS Secrets Manager (for Gmail)
 Store your Gmail OAuth details securely:

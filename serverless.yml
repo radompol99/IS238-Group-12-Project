@@ -22,6 +22,8 @@ provider:
     OPENROUTER_API_KEY: ${env:OPENROUTER_API_KEY}
     OPENROUTER_MODEL: ${env:OPENROUTER_MODEL, 'openrouter/auto'}
     ENABLE_FETCH: ${env:ENABLE_FETCH, 'false'}
+    CLOUDFLARE_API_TOKEN: ${env:CLOUDFLARE_API_TOKEN}
+    CLOUDFLARE_ZONE_ID: ${env:CLOUDFLARE_ZONE_ID}
   iam:
     role:
       statements:
