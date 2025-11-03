@@ -1,0 +1,54 @@
+service: is238-email-ingestion
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ${env:AWS_REGION, 'us-east-1'}
+  environment:
+    S3_BUCKET: ${env:S3_BUCKET}
+    DDB_TABLE: ${env:DDB_TABLE}
+    SECRETS_ARN: ${env:SECRETS_ARN}
+    GMAIL_USER: ${env:GMAIL_USER}
+    ENABLE_FETCH: ${env:ENABLE_FETCH, 'false'}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - secretsmanager:GetSecretValue
+          Resource: ${env:SECRETS_ARN, '*'}
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+          Resource: arn:aws:s3:::${env:S3_BUCKET}/*
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DescribeTable
+          Resource:
+            - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/${env:DDB_TABLE}
+
+functions:
+  lambda1FetchGmail:
+    handler: src/lambda1_fetch_gmail/handler.handler
+    timeout: 180
+    memorySize: 256
+    description: Fetch unread Gmail via IMAP, store raw emails to S3
+    events:
+      - schedule:
+          rate: rate(5 minutes)
+          enabled: false
+
+package:
+  patterns:
+    - '!**/*.test.*'
+    - 'src/**'
+    - 'package.json'
+
+custom:
+  stage: ${opt:stage, 'dev'}
+

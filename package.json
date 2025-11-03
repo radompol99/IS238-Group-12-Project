@@ -1,0 +1,22 @@
+{
+  "name": "IS238-Project-Repo",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "Axztech_main <rioaldi.dompol@gmail.com>",
+  "license": "MIT",
+  "scripts": {
+    "build": "serverless package",
+    "deploy": "serverless deploy",
+    "invoke": "serverless invoke local -f lambda1FetchGmail"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.922.0",
+    "@aws-sdk/client-s3": "^3.922.0",
+    "@aws-sdk/client-secrets-manager": "^3.922.0",
+    "@aws-sdk/s3-request-presigner": "^3.922.0",
+    "googleapis": "^164.1.0",
+    "imapflow": "^1.1.1",
+    "mailparser": "^3.7.5",
+    "node-fetch": "^3.3.2"
+  }
+}
