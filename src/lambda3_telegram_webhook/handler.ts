@@ -36,7 +36,7 @@ export const handler = async (event: any) => {
 
   if (text === '/start') {
     await ensureUser(chatId, msg.from);
-    await sendTelegram(chatId, 'Welcome! Use /new to generate an email address, /list to view addresses.');
+    await sendTelegram(chatId, 'Welcome! Use /new to generate an email address, /list to view addresses, /deactivate to remove an address.');
   } else if (text === '/new') {
     const addr = await createAddress(chatId);
     await sendTelegram(chatId, `New address: <b>${addr}</b>\nSend email to this address to receive summaries here.`);
@@ -44,8 +44,17 @@ export const handler = async (event: any) => {
     const list = await listAddresses(chatId);
     if (!list.length) await sendTelegram(chatId, 'No active addresses. Use /new to create one.');
     else await sendTelegram(chatId, list.map(a => `• ${a}`).join('\n'));
+  } else if (text.startsWith('/deactivate')) {
+    const parts = text.split(/\s+/);
+    if (parts.length < 2) {
+      await sendTelegram(chatId, 'Usage: /deactivate <email-address>\nExample: /deactivate abc123@upou2025manny.ninja');
+    } else {
+      const addr = parts[1].trim();
+      await deactivateAddress(chatId, addr);
+      await sendTelegram(chatId, `✓ Deactivated ${addr}`);
+    }
   } else {
-    await sendTelegram(chatId, 'Unknown command. Try /new or /list');
+    await sendTelegram(chatId, 'Unknown command. Try /new, /list, or /deactivate <address>');
   }
 
   return ok();
