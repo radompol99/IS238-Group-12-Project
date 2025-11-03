@@ -8,6 +8,9 @@ const TABLE = process.env.DDB_TABLE as string;
 const DOMAIN = process.env.DOMAIN as string;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN as string;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET as string;
+const GMAIL_USER = process.env.GMAIL_USER as string;
+const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN as string;
+const CLOUDFLARE_ZONE_ID = process.env.CLOUDFLARE_ZONE_ID as string;
 
 export const handler = async (event: any) => {
   if (WEBHOOK_SECRET && event?.headers) {
@@ -146,6 +149,10 @@ function randAddress(): string {
 async function createAddress(chatId: number): Promise<string> {
   const addr = randAddress();
   const pk = `USER#${chatId}`;
+  
+  // Create Cloudflare email route
+  const routeId = await createCloudflareEmailRoute(addr);
+  
   try {
     await ddb.send(new PutItemCommand({
       TableName: TABLE,
@@ -156,6 +163,7 @@ async function createAddress(chatId: number): Promise<string> {
         GSI1SK: { S: `USER#${chatId}` },
         status: { S: 'ACTIVE' },
         chatId: { N: String(chatId) },
+        ...(routeId && { cloudflareRouteId: { S: routeId } }),
       },
       ConditionExpression: 'attribute_not_exists(pk)',
     }));
@@ -171,6 +179,7 @@ async function createAddress(chatId: number): Promise<string> {
         GSI1SK: { S: `USER#${chatId}` },
         status: { S: 'ACTIVE' },
         chatId: { N: String(chatId) },
+        ...(routeId && { cloudflareRouteId: { S: routeId } }),
       },
     }));
   }
@@ -194,6 +203,26 @@ async function listAddresses(chatId: number): Promise<string[]> {
 
 async function deactivateAddress(chatId: number, addr: string) {
   const pk = `USER#${chatId}`;
+  
+  // Get the address record to find the Cloudflare route ID
+  const getResult = await ddb.send(new QueryCommand({
+    TableName: TABLE,
+    KeyConditionExpression: 'pk = :pk AND sk = :sk',
+    ExpressionAttributeValues: {
+      ':pk': { S: pk },
+      ':sk': { S: `ADDRESS#${addr}` },
+    },
+  }));
+
+  const addressRecord = getResult.Items?.[0];
+  const routeId = addressRecord?.cloudflareRouteId?.S;
+
+  // Delete Cloudflare route if it exists
+  if (routeId) {
+    await deleteCloudflareEmailRoute(routeId);
+  }
+
+  // Update DynamoDB status
   await ddb.send(new UpdateItemCommand({
     TableName: TABLE,
     Key: { pk: { S: pk }, sk: { S: `ADDRESS#${addr}` } },
@@ -210,5 +239,78 @@ async function sendTelegram(chatId: number, text: string) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
   }).catch((e) => console.error('Telegram error', e));
+}
+
+// Cloudflare Email Routing API functions
+async function createCloudflareEmailRoute(emailAddress: string): Promise<string | null> {
+  if (!CLOUDFLARE_API_TOKEN || !CLOUDFLARE_ZONE_ID || !GMAIL_USER) {
+    console.warn('Cloudflare credentials not configured, skipping email route creation');
+    return null;
+  }
+
+  const url = `https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/email/routing/rules`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        matchers: [
+          {
+            type: 'literal',
+            field: 'to',
+            value: emailAddress,
+          },
+        ],
+        actions: [
+          {
+            type: 'forward',
+            value: [GMAIL_USER],
+          },
+        ],
+        enabled: true,
+        name: `Route for ${emailAddress}`,
+      }),
+    });
+
+    const data = await response.json() as any;
+    
+    if (!response.ok || !data.success) {
+      console.error('Cloudflare API error:', data);
+      return null;
+    }
+
+    return data.result?.tag || data.result?.id || null;
+  } catch (error) {
+    console.error('Failed to create Cloudflare email route:', error);
+    return null;
+  }
+}
+
+async function deleteCloudflareEmailRoute(routeId: string): Promise<boolean> {
+  if (!CLOUDFLARE_API_TOKEN || !CLOUDFLARE_ZONE_ID || !routeId) {
+    return false;
+  }
+
+  const url = `https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/email/routing/rules/${routeId}`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const data = await response.json() as any;
+    return response.ok && data.success;
+  } catch (error) {
+    console.error('Failed to delete Cloudflare email route:', error);
+    return false;
+  }
 }
 
