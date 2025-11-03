@@ -10,6 +10,8 @@ const BUCKET = process.env.S3_BUCKET as string;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN as string;
 const OPENAI_SUMMARY_URL = process.env.OPENAI_SUMMARY_URL as string;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY as string;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY as string;
+const OPENROUTER_MODEL = (process.env.OPENROUTER_MODEL as string) || 'openrouter/auto';
 
 async function getS3ObjectBody(bucket: string, key: string): Promise<Buffer> {
   const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
@@ -20,21 +22,66 @@ async function getS3ObjectBody(bucket: string, key: string): Promise<Buffer> {
 }
 
 async function summarize(text: string): Promise<string> {
-  if (!OPENAI_SUMMARY_URL || !OPENAI_API_KEY) return 'Summary service not configured.';
-  const resp = await fetch(OPENAI_SUMMARY_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({ text }),
-  });
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => '');
-    throw new Error(`Summary failed: ${resp.status} ${body}`);
+  // Try primary OpenAI-like endpoint first (custom proxy or service)
+  if (OPENAI_SUMMARY_URL && OPENAI_API_KEY) {
+    try {
+      const resp = await fetch(OPENAI_SUMMARY_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({ text }),
+      });
+      if (resp.ok) {
+        const data = (await resp.json()) as any;
+        const val = data.summary || data.result || data.output || '';
+        if (val) return String(val);
+      } else {
+        const body = await resp.text().catch(() => '');
+        console.warn('Primary summary failed:', resp.status, body);
+      }
+    } catch (e) {
+      console.warn('Primary summary exception:', (e as Error).message);
+    }
   }
-  const data = (await resp.json()) as any;
-  return data.summary || data.result || 'No summary produced.';
+
+  // Fallback: OpenRouter chat completions
+  if (OPENROUTER_API_KEY) {
+    try {
+      const url = 'https://openrouter.ai/api/v1/chat/completions';
+      const prompt = `Summarize the following email for a non-technical reader in 5-8 concise bullet points. Include sender (if available), subject gist, key asks or decisions, dates/deadlines, and any attachment mentions. Keep it short and actionable.\n\n---\n${text.slice(0, 16000)}`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'X-Title': 'IS238 Email Summarizer',
+        },
+        body: JSON.stringify({
+          model: OPENROUTER_MODEL,
+          messages: [
+            { role: 'system', content: 'You are a helpful assistant that writes concise business email summaries.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.2,
+        }),
+      });
+      if (resp.ok) {
+        const data = (await resp.json()) as any;
+        const content = data?.choices?.[0]?.message?.content;
+        if (content) return String(content);
+        console.warn('OpenRouter returned no content');
+      } else {
+        const body = await resp.text().catch(() => '');
+        console.warn('OpenRouter failed:', resp.status, body);
+      }
+    } catch (e) {
+      console.warn('OpenRouter exception:', (e as Error).message);
+    }
+  }
+
+  return 'Summary unavailable.';
 }
 
 async function presignDownload(bucket: string, key: string, days = 7): Promise<string> {
@@ -120,4 +167,3 @@ export const handler = async (event: any) => {
 function escapeHtml(s: string) {
   return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
 }
-

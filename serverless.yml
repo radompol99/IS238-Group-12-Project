@@ -19,6 +19,8 @@ provider:
     WEBHOOK_SECRET: ${env:WEBHOOK_SECRET}
     OPENAI_SUMMARY_URL: ${env:OPENAI_SUMMARY_URL}
     OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+    OPENROUTER_API_KEY: ${env:OPENROUTER_API_KEY}
+    OPENROUTER_MODEL: ${env:OPENROUTER_MODEL, 'openrouter/auto'}
     ENABLE_FETCH: ${env:ENABLE_FETCH, 'false'}
   iam:
     role:
