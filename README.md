@@ -228,4 +228,4 @@ S3 bucket auto-management:
 
 ## 🧾 License
 
-MIT © 2025 AXZTech IT Solutions — for educational MVP use.
+MIT © 2025  GROUP 12  — for educational MVP use.
