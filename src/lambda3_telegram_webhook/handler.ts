@@ -26,8 +26,12 @@ export const handler = async (event: any) => {
     const data: string = cq.data || '';
     if (data.startsWith('deactivate:')) {
       const addr = data.split(':')[1];
-      await deactivateAddress(chatId, addr);
-      await sendTelegram(chatId, `✅ <b>Address deactivated</b>\n\n📧 <code>${addr}</code>\n\nThis address will no longer receive emails.`);
+      try {
+        await deactivateAddress(chatId, addr);
+        await sendTelegram(chatId, `✅ <b>Address deactivated</b>\n\n📧 <code>${addr}</code>\n\nThis address will no longer receive emails.`);
+      } catch (error) {
+        await sendTelegram(chatId, `❌ <b>Failed to deactivate address</b>\n\n📧 <code>${addr}</code>\n\nThere was an error removing the email routing. Please try again later.`);
+      }
     }
     return ok();
   }
@@ -100,14 +104,22 @@ Use /new to create your first temporary email address!`);
 💡 Use /list to see your active addresses`);
     } else {
       const addr = parts[1].trim();
-      await deactivateAddress(chatId, addr);
-      await sendTelegram(chatId, `✅ <b>Address deactivated</b>
+      try {
+        await deactivateAddress(chatId, addr);
+        await sendTelegram(chatId, `✅ <b>Address deactivated</b>
 
 📧 <code>${addr}</code>
 
 This address will no longer receive emails.
 
 Use /new to create a new address or /list to see your remaining addresses.`);
+      } catch (error) {
+        await sendTelegram(chatId, `❌ <b>Failed to deactivate address</b>
+
+📧 <code>${addr}</code>
+
+There was an error removing the email routing. Please try again later.`);
+      }
     }
   } else {
     await sendTelegram(chatId, `❓ <b>Unknown command</b>
@@ -219,10 +231,13 @@ async function deactivateAddress(chatId: number, addr: string) {
 
   // Delete Cloudflare route if it exists
   if (routeId) {
-    await deleteCloudflareEmailRoute(routeId);
+    const deleteSuccess = await deleteCloudflareEmailRoute(routeId);
+    if (!deleteSuccess) {
+      throw new Error('Failed to delete Cloudflare email route');
+    }
   }
 
-  // Update DynamoDB status
+  // Update DynamoDB status only if Cloudflare deletion succeeded (or no route existed)
   await ddb.send(new UpdateItemCommand({
     TableName: TABLE,
     Key: { pk: { S: pk }, sk: { S: `ADDRESS#${addr}` } },
