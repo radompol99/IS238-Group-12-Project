@@ -138,9 +138,8 @@ Cloudflare Email Routing allows you to automatically forward emails sent to your
 
 3. **Get API Token**
    - Go to My Profile → API Tokens → Create Token
-   - Use template "Edit Zone" or create custom token with these permissions:
+   - Use template "Edit Zone" or create custom token with this permission:
      - Zone → Email Routing Rules → Edit
-     - Account → Email Routing Rules → Edit
    - Copy the API token to `CLOUDFLARE_API_TOKEN`
 
 4. **Get Zone ID and Account ID**
