@@ -80,18 +80,20 @@ function randAddress(): string {
 async function createAddress(chatId: number): Promise<string> {
   const addr = randAddress();
   const pk = `USER#${chatId}`;
-  await ddb.send(new PutItemCommand({
-    TableName: TABLE,
-    Item: {
-      pk: { S: pk },
-      sk: { S: `ADDRESS#${addr}` },
-      GSI1PK: { S: `ADDRESS#${addr.toLowerCase()}` },
-      GSI1SK: { S: `USER#${chatId}` },
-      status: { S: 'ACTIVE' },
-      chatId: { N: String(chatId) },
-    },
-    ConditionExpression: 'attribute_not_exists(pk)',
-  }).catch(async (e) => {
+  try {
+    await ddb.send(new PutItemCommand({
+      TableName: TABLE,
+      Item: {
+        pk: { S: pk },
+        sk: { S: `ADDRESS#${addr}` },
+        GSI1PK: { S: `ADDRESS#${addr.toLowerCase()}` },
+        GSI1SK: { S: `USER#${chatId}` },
+        status: { S: 'ACTIVE' },
+        chatId: { N: String(chatId) },
+      },
+      ConditionExpression: 'attribute_not_exists(pk)',
+    }));
+  } catch (e) {
     // If user profile doesn't exist yet, create it and retry
     await ensureUser(chatId, {});
     await ddb.send(new PutItemCommand({
@@ -105,7 +107,7 @@ async function createAddress(chatId: number): Promise<string> {
         chatId: { N: String(chatId) },
       },
     }));
-  }));
+  }
   return addr;
 }
 
