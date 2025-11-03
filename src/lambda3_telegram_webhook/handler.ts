@@ -36,7 +36,21 @@ export const handler = async (event: any) => {
 
   if (text === '/start') {
     await ensureUser(chatId, msg.from);
-    await sendTelegram(chatId, 'Welcome! Use /new to generate an email address, /list to view addresses, /deactivate to remove an address.');
+    await sendTelegram(chatId, 'Welcome! Use /help to see available commands.');
+  } else if (text === '/help') {
+    const helpText = `
+<b>Available Commands:</b>
+
+/start - Welcome message
+/help - Show this help message
+/new - Generate a new email address
+/list - View all your active email addresses
+/deactivate &lt;address&gt; - Deactivate an email address
+
+<b>Example:</b>
+/deactivate abc123@${DOMAIN}
+    `.trim();
+    await sendTelegram(chatId, helpText);
   } else if (text === '/new') {
     const addr = await createAddress(chatId);
     await sendTelegram(chatId, `New address: <b>${addr}</b>\nSend email to this address to receive summaries here.`);
@@ -54,7 +68,7 @@ export const handler = async (event: any) => {
       await sendTelegram(chatId, `✓ Deactivated ${addr}`);
     }
   } else {
-    await sendTelegram(chatId, 'Unknown command. Try /new, /list, or /deactivate <address>');
+    await sendTelegram(chatId, 'Unknown command. Try /help to see available commands.');
   }
 
   return ok();
