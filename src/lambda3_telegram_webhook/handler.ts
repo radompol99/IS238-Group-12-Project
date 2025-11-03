@@ -150,7 +150,7 @@ async function createAddress(chatId: number): Promise<string> {
   const addr = randAddress();
   const pk = `USER#${chatId}`;
   
-  // First, write to DynamoDB to reserve the address
+  // First, write to DynamoDB without Cloudflare route ID
   try {
     await ddb.send(new PutItemCommand({
       TableName: TABLE,
@@ -164,13 +164,8 @@ async function createAddress(chatId: number): Promise<string> {
       },
       ConditionExpression: 'attribute_not_exists(pk)',
     }));
-  } catch (e: any) {
+  } catch (e) {
     // If user profile doesn't exist yet, create it and retry
-    if (e.name === 'ConditionalCheckFailedException') {
-      // Address collision - retry with a new address
-      return createAddress(chatId);
-    }
-    // Otherwise, assume user profile doesn't exist
     await ensureUser(chatId, {});
     await ddb.send(new PutItemCommand({
       TableName: TABLE,
@@ -185,17 +180,27 @@ async function createAddress(chatId: number): Promise<string> {
     }));
   }
   
-  // After successful DynamoDB write, create Cloudflare email route
+  // After successful DB write, create Cloudflare email route
   const routeId = await createCloudflareEmailRoute(addr);
   
-  // Update the DynamoDB record with the Cloudflare route ID if created
+  // Update the DB record with the Cloudflare route ID if creation succeeded
   if (routeId) {
-    await ddb.send(new UpdateItemCommand({
-      TableName: TABLE,
-      Key: { pk: { S: pk }, sk: { S: `ADDRESS#${addr}` } },
-      UpdateExpression: 'SET cloudflareRouteId = :routeId',
-      ExpressionAttributeValues: { ':routeId': { S: routeId } },
-    }));
+    try {
+      await ddb.send(new UpdateItemCommand({
+        TableName: TABLE,
+        Key: {
+          pk: { S: pk },
+          sk: { S: `ADDRESS#${addr}` },
+        },
+        UpdateExpression: 'SET cloudflareRouteId = :routeId',
+        ExpressionAttributeValues: {
+          ':routeId': { S: routeId },
+        },
+      }));
+    } catch (error) {
+      console.error('Failed to update DB with Cloudflare route ID:', error);
+      // Route creation succeeded but DB update failed - log for manual cleanup if needed
+    }
   }
   
   return addr;
