@@ -24,7 +24,7 @@ export const handler = async (event: any) => {
     if (data.startsWith('deactivate:')) {
       const addr = data.split(':')[1];
       await deactivateAddress(chatId, addr);
-      await sendTelegram(chatId, `Deactivated ${addr}`);
+      await sendTelegram(chatId, `✅ <b>Address deactivated</b>\n\n📧 <code>${addr}</code>\n\nThis address will no longer receive emails.`);
     }
     return ok();
   }
@@ -36,39 +36,82 @@ export const handler = async (event: any) => {
 
   if (text === '/start') {
     await ensureUser(chatId, msg.from);
-    await sendTelegram(chatId, 'Welcome! Use /help to see available commands.');
+    await sendTelegram(chatId, `👋 <b>Welcome to AI Email Summarizer!</b>
+
+I help you create disposable email addresses to protect your privacy.
+
+📧 Generated emails will be forwarded here as AI summaries.
+
+Type /help to see what I can do!`);
   } else if (text === '/help') {
     const helpText = `
-<b>Available Commands:</b>
+📋 <b>Available Commands:</b>
 
 /start - Welcome message
-/help - Show this help message
-/new - Generate a new email address
+/help - Show this help menu
+/new - Create a new temporary email address
 /list - View all your active email addresses
 /deactivate &lt;address&gt; - Deactivate an email address
 
+💡 <b>How it works:</b>
+1. Use /new to generate an email address
+2. Share it with websites or services
+3. Receive AI-powered email summaries here
+4. Deactivate when done
+
 <b>Example:</b>
-/deactivate abc123@${DOMAIN}
+<code>/deactivate abc123@${DOMAIN}</code>
     `.trim();
     await sendTelegram(chatId, helpText);
   } else if (text === '/new') {
     const addr = await createAddress(chatId);
-    await sendTelegram(chatId, `New address: <b>${addr}</b>\nSend email to this address to receive summaries here.`);
+    await sendTelegram(chatId, `✅ <b>New email address created!</b>
+
+📧 <code>${addr}</code>
+
+Use this address to sign up for services. You'll receive AI summaries of any emails sent to it.
+
+💡 Tip: Tap to copy the address above.`);
   } else if (text === '/list') {
     const list = await listAddresses(chatId);
-    if (!list.length) await sendTelegram(chatId, 'No active addresses. Use /new to create one.');
-    else await sendTelegram(chatId, list.map(a => `• ${a}`).join('\n'));
+    if (!list.length) {
+      await sendTelegram(chatId, `📭 <b>No active addresses</b>
+
+You don't have any active email addresses yet.
+
+Use /new to create your first temporary email address!`);
+    } else {
+      const addresses = list.map((a, i) => `${i + 1}. <code>${a}</code>`).join('\n');
+      await sendTelegram(chatId, `📬 <b>Your Active Email Addresses:</b>\n\n${addresses}\n\n💡 Use /deactivate to remove an address`);
+    }
   } else if (text.startsWith('/deactivate')) {
     const parts = text.split(/\s+/);
     if (parts.length < 2) {
-      await sendTelegram(chatId, 'Usage: /deactivate <email-address>\nExample: /deactivate abc123@upou2025manny.ninja');
+      await sendTelegram(chatId, `❌ <b>Missing email address</b>
+
+<b>Usage:</b> /deactivate &lt;address&gt;
+
+<b>Example:</b>
+<code>/deactivate abc123@${DOMAIN}</code>
+
+💡 Use /list to see your active addresses`);
     } else {
       const addr = parts[1].trim();
       await deactivateAddress(chatId, addr);
-      await sendTelegram(chatId, `✓ Deactivated ${addr}`);
+      await sendTelegram(chatId, `✅ <b>Address deactivated</b>
+
+📧 <code>${addr}</code>
+
+This address will no longer receive emails.
+
+Use /new to create a new address or /list to see your remaining addresses.`);
     }
   } else {
-    await sendTelegram(chatId, 'Unknown command. Try /help to see available commands.');
+    await sendTelegram(chatId, `❓ <b>Unknown command</b>
+
+I didn't understand that command.
+
+Type /help to see all available commands.`);
   }
 
   return ok();
