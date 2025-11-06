@@ -1,0 +1,20 @@
+⚙️ Setup Instructions
+
+1. S3 Bucket:
+
+Configure S3 to store incoming emails (e.g., via SES).
+Add an event notification for s3:ObjectCreated:* → Lambda trigger.
+
+2. Lambda Configuration:
+
+Runtime: Python 3.12
+Environment Variables:
+
+TelegramID:is238
+Telegram Token: 8587106666:AAEouKtLyfwDDp1hBtOaXi_Yp_PAfpE5Wzo
+OpenRouter Key: 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
+
+3. IAM Role permissions:
+
+s3:GetObject for your email bucket
+Internet access (if using a public VPC or NAT for API calls)
