@@ -1,88 +1,106 @@
 import os
 import boto3
-import requests
+import json
 import email
+import requests
 
-s3 = boto3.client('s3')
+s3 = boto3.client("s3")
+ddb = boto3.resource("dynamodb")
+table = ddb.Table(os.environ["ADDRESSES_TABLE"])
 
-# Environment variables
 OPENROUTER_API_KEY = os.environ["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"]
 TELEGRAM_BOT_TOKEN = os.environ["8587106666:AAEouKtLyfwDDp1hBtOaXi_Yp_PAfpE5Wzo"]
 TELEGRAM_CHAT_ID = os.environ["is238"]
 
-OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "gpt-4o-mini")
-
-def summarize_email(subject, body):
-    """Send email content to OpenRouter for summarization."""
-    prompt = f"Summarize this email in a concise paragraph:\n\nSubject: {subject}\n\n{body}"
-
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://your-app.example.com/",
-        "X-Title": "Email Summarizer Lambda"
-    }
-
-    data = {
-        "model": OPENROUTER_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 300,
-    }
-
-    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers)
-    resp.raise_for_status()
-    summary = resp.json()["choices"][0]["message"]["content"]
-    return summary.strip()
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+OPENAI_ENDPOINT = "https://openai.is238.upou.io/v1/chat/completions"
 
 
-def send_to_telegram(message):
-    """Send a message to Telegram chat."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+def summarize_with_openai(text):
     payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": "Summarize this email for a human."},
+            {"role": "user", "content": text}
+        ]
     }
-    requests.post(url, json=payload)
 
+    res = requests.post(
+        OPENAI_ENDPOINT,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {OPENAI_API_KEY}"
+        },
+        json=payload,
+        timeout=30
+    )
 
-def parse_email_file(file_path):
-    """Parse .eml file and extract subject and text body."""
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-        raw_email = f.read()
-
-    msg = email.message_from_string(raw_email)
-    subject = msg.get('Subject', '(no subject)')
-    sender = msg.get('From', '')
-
-    body = ''
-    if msg.is_multipart():
-        for part in msg.walk():
-            if part.get_content_type() == 'text/plain':
-                body += part.get_payload(decode=True).decode(errors='ignore')
-    else:
-        body = msg.get_payload(decode=True).decode(errors='ignore')
-
-    return subject, sender, body.strip()
+    res.raise_for_status()
+    data = res.json()
+    return data["choices"][0]["message"]["content"]
 
 
 def lambda_handler(event, context):
-    # Get S3 info
-    record = event['Records'][0]
-    bucket = record['s3']['bucket']['name']
-    key = record['s3']['object']['key']
+    record = event["Records"][0]
+    bucket = record["s3"]["bucket"]["name"]
+    key = record["s3"]["object"]["key"]
 
-    tmp_path = f"/tmp/{os.path.basename(key)}"
-    s3.download_file(bucket, key, tmp_path)
+    # Download email
+    obj = s3.get_object(Bucket=bucket, Key=key)
+    raw_email = obj["Body"].read().decode("utf-8")
+    parsed = email.message_from_string(raw_email)
 
-    # Parse email
-    subject, sender, body = parse_email_file(tmp_path)
+    sender = parsed.get("From", "")
+    subject = parsed.get("Subject", "")
+    address = parsed.get("To", "")
 
-    # Summarize via OpenRouter
-    summary = summarize_email(subject, body)
+    # Extract text body
+    body = ""
+    if parsed.is_multipart():
+        for part in parsed.walk():
+            if part.get_content_type() == "text/plain":
+                body = part.get_payload(decode=True).decode(errors="ignore")
+                break
+    else:
+        body = parsed.get_payload(decode=True).decode(errors="ignore")
 
-    # Send summary to Telegram
-    telegram_msg = f"📧 *Email Summary*\nFrom: {sender}\nSubject: {subject}\n\n{summary}"
-    send_to_telegram(telegram_msg)
+    # Check if address is active
+    res = table.get_item(Key={"address": address}).get("Item")
+    if not res or not res.get("active", True):
+        print("Address disabled; skipping")
+        return
 
-    return {"statusCode": 200, "body": "Summary sent to Telegram"}
+    # Summarize via your OpenAI endpoint
+    summary = summarize_with_openai(body[:15000])
+
+    # Pre-signed URL (7 days)
+    url = s3.generate_presigned_url(
+        ClientMethod="get_object",
+        ExpiresIn=604800,
+        Params={"Bucket": bucket, "Key": key}
+    )
+
+    # Telegram message
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": (
+            f"📥 *New email received*\n\n"
+            f"*From:* {sender}\n"
+            f"*Subject:* {subject}\n\n"
+            f"*Summary:*\n{summary}"
+        ),
+        "parse_mode": "Markdown",
+        "reply_markup": {
+            "inline_keyboard": [
+                [{"text": "⬇️ Download raw email", "url": url}],
+                [{"text": "🛑 Deactivate this address", "callback_data": f"deactivate:{address}"}]
+            ]
+        }
+    }
+
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        json=payload
+    )
+
+    return {"status": "ok"}
